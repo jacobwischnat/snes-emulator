@@ -22,11 +22,12 @@ const invert = (value, bytes = 1) => {
     return inverted;
 }
 
+const PAGE_SIZE = 0x100;
+
 module.exports = class CPU {
     constructor() {
-        this.STACK = [];
         this.PC = 0;
-        this.SP = 0;
+        this.SP = 0x1fff;
         this.A = 0;
         this.B = 0;
 
@@ -34,10 +35,10 @@ module.exports = class CPU {
         this.X = 0;
         this.Y = 0;
 
-        this.DBR = 0;
-        this.D = 0;
-        this.PBR = 0;
-        this.P = 0;
+        this.DBR = 0; // Data-Bank Register
+        this.PBR = 0; // Page-Bank Register
+        this.P = 0; // Program-Bank Register
+        this.D = 0; // Direct-Page Register
         this.flags = 0;
         this.E = 0;
 
@@ -57,14 +58,21 @@ module.exports = class CPU {
 
     static get Instruction() {
         return {
+            ADC: 0x65,
             AND: 0x21,
+            AND_DP: 0x32,
             CLC: 0x18,
             LDA: 0xA9,
             LDX: 0xA2,
             PHA: 0x48,
+            PHB: 0x8B,
+            PHD: 0x0B,
+            PHK: 0x4B,
             PHX: 0xDA,
             PLB: 0xAB,
             PLD: 0x2B,
+            PLX: 0xFA,
+            JSR: 0x20,
             REP: 0xC2,
             SEI: 0x78,
             SEP: 0xE2,
@@ -72,6 +80,8 @@ module.exports = class CPU {
             STA_Y: 0x97,
             STZ: 0x9C,
             STY_ZPX: 0x94,
+            TAX: 0xAA,
+            TXA: 0x8A,
             TXS: 0x9A,
             XBA: 0xEB,
             XCE: 0xFB,
@@ -100,6 +110,33 @@ module.exports = class CPU {
             this.PC += 1;
 
             switch (instruction) {
+                case CPU.Instruction.ADC:
+                    {
+                        const page = memory.readByte(this.PC);
+                        const address = page * PAGE_SIZE;
+                        const value = memory.readWord(address);
+
+                        const result = value + (this.C ? 1 : 0);
+
+                        if (result < 0) this.flags |= FLAGS.N;
+                        if (result === 0) this.flags |= FLAGS.Z;
+                        if (result & 0x80) this.flags |= FLAGS.V;
+
+                        this.A = result & 0xFF;
+
+                        this.PC += 1;
+                        cost += 3;
+                    }
+                    break;
+
+                case CPU.Instruction.JSR:
+                    {
+                        const address = memory.readWord(this.PC);
+                        this.PC = address;
+                        cost += 6;
+                    }
+                    break;
+
                 case CPU.Instruction.LDX:
                     {
                         const value = memory.readWord(this.PC);
@@ -112,33 +149,62 @@ module.exports = class CPU {
 
                 case CPU.Instruction.PHA:
                     {
-                        this.STACK.push(this.A);
-                        this.SP = this.STACK.length;
+                        memory.writeByte(this.A, this.SP);
+                        this.SP += 1;
                         cost += 1;
+                    }
+                    break;
+
+                case CPU.Instruction.PHB:
+                    {
+                        memory.writeByte(this.DBR, this.SP);
+                        this.SP += 1;
+                        cost += 1;
+                    }
+                    break;
+
+                case CPU.Instruction.PHD:
+                    {
+                        memory.writeByte(this.D, this.SP);
+                        this.SP += 1;
+                        cost += 1;
+                    }
+                    break;
+
+                case CPU.Instruction.PHK:
+                    {
+                        memory.writeByte(this.PBR, this.SP);
+                        this.SP += 1;
+                        cost += 3;
                     }
                     break;
 
                 case CPU.Instruction.PHX:
                     {
-                        this.STACK.push(this.X);
-                        this.SP = this.STACK.length;
+                        memory.writeByte(this.X, this.SP);
+                        this.SP += 1;
                         cost += 1;
                     }
                     break;
 
                 case CPU.Instruction.PLB:
                     {
-                        this.PLB = this.STACK.pop();
-                        this.SP = this.STACK.length;
+                        this.DBR = memory.readByte(--this.SP);
                         cost += 5;
                     }
                     break;
 
                 case CPU.Instruction.PLD:
                     {
-                        this.PBR = this.STACK.pop();
-                        this.SP = this.STACK.length;
+                        this.D = memory.readByte(--this.SP);
                         cost += 5;
+                    }
+                    break;
+
+                case CPU.Instruction.PLX:
+                    {
+                        this.X = memory.readByte(--this.SP);
+                        cost += 4;
                     }
                     break;
 
@@ -151,6 +217,16 @@ module.exports = class CPU {
                         this.PC += 1;
                         cost += 2;
                         console.log(`AND: Anding value: 0x${hex(value)} with A ${ab4}->${bin(this.A)}`);
+                    }
+                    break;
+
+                case CPU.Instruction.AND_DP:
+                    {
+                        const value = memory.readByte(this.PC);
+                        this.A &= value;
+
+                        this.PC += 1;
+                        cost += 5;
                     }
                     break;
 
@@ -272,6 +348,13 @@ module.exports = class CPU {
                         this.B = temp;
                         cost += 3;
                         console.log(`XBA: Exchanging B register 0x${hex(temp)} with A register 0x${hex(ab4)}`);
+                    }
+                    break;
+
+                case CPU.Instruction.TXA:
+                    {
+                        this.A = this.X;
+                        cost += 2;
                     }
                     break;
 
