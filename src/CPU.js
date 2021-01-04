@@ -2,8 +2,8 @@ const hex = (number, size = 2) => number.toString(16).padStart(size, '0');
 const bin = (number, bits = 8) => number.toString(2).padStart(bits, '0');
 
 const FLAGS = {
-    N: 0b10000000,
-    V: 0b01000000,
+    N_NEGATIVE: 0b10000000,
+    V_OVERFLOW: 0b01000000,
     Z: 0b00000010,
     C: 0b00000001,  // Carry Flag
     D: 0b00001000,
@@ -39,7 +39,7 @@ module.exports = class CPU {
         this.PBR = 0; // Page-Bank Register
         this.P = 0; // Program-Bank Register
         this.D = 0; // Direct-Page Register
-        this.flags = 0;
+        this.flags = 1;
         this.E = 0;
 
         this.frequency = 1;
@@ -61,8 +61,10 @@ module.exports = class CPU {
             ADC: 0x65,
             AND: 0x21,
             AND_DP: 0x32,
+            BRA: 0x80,
             CLC: 0x18,
             LDA: 0xA9,
+            LDA_Y: 0xB9,
             LDX: 0xA2,
             PHA: 0x48,
             PHB: 0x8B,
@@ -79,7 +81,7 @@ module.exports = class CPU {
             STA_A: 0x8D,
             STA_Y: 0x97,
             STZ: 0x9C,
-            STY_ZPX: 0x94,
+            STY_DPX: 0x94,
             TAX: 0xAA,
             TXA: 0x8A,
             TXS: 0x9A,
@@ -96,7 +98,7 @@ module.exports = class CPU {
         return `PC: ${hex(this.PC, 2)} A: ${this.A} SP: ${this.SP} FLAGS: ${bin(this.flags)}`;
     }
 
-    run(memory, startAddress) {
+    run(memory, startAddress, options = {}) {
         let cost = 0;
 
         console.log(`startAddress: ${startAddress}(${hex(startAddress)})`);
@@ -118,13 +120,24 @@ module.exports = class CPU {
 
                         const result = value + (this.C ? 1 : 0);
 
-                        if (result < 0) this.flags |= FLAGS.N;
+                        if (result < 0) this.flags |= FLAGS.N_NEGATIVE;
                         if (result === 0) this.flags |= FLAGS.Z;
-                        if (result & 0x80) this.flags |= FLAGS.V;
+                        if (result & 0x80) this.flags |= FLAGS.V_OVERFLOW;
 
                         this.A = result & 0xFF;
 
                         this.PC += 1;
+                        cost += 3;
+                    }
+                    break;
+
+                case CPU.Instruction.BRA:
+                    {
+                        const offset = memory.readByte(this.PC);
+                        this.PC += 1;
+
+                        const address = this.PC + offset;
+                        this.PC = address;
                         cost += 3;
                     }
                     break;
@@ -240,6 +253,15 @@ module.exports = class CPU {
                     }
                     break;
 
+                case CPU.Instruction.LDA_Y:
+                    const offset = memory.readByte(this.PC);
+                    const address = this.Y + offset;
+                    const value = memory.readByte(address);
+                    this.PC += 1;
+                    cost += 4;
+                    console.log(`LDA: Storing value: 0x${hex(value)} from 0x${hex(address, 4)} into A`);
+                    break;
+
                 case CPU.Instruction.SEP:
                     {
                         const mask = memory.readByte(this.PC);
@@ -330,11 +352,12 @@ module.exports = class CPU {
                     }
                     break;
 
-                case CPU.Instruction.STY_ZPX:
+                case CPU.Instruction.STY_DPX: // Direct Page + X
                     {
-                        const address = memory.readByte(this.PC);
-                        memory.writeByte(this.Y, address + this.X);
-                        console.log(`STY_ZPX: Storing Y into Address: 0x${hex(address)} + X(${hex(this.X)})`)
+                        const page = memory.readByte(this.PC);
+                        const address = (page * PAGE_SIZE) + this.X;
+                        memory.writeByte(this.Y, address);
+                        console.log(`STY_DPX: Storing Y into Address: 0x${hex(address)}`)
                         this.PC += 1;
                         cost += 4;
                     }
@@ -348,6 +371,20 @@ module.exports = class CPU {
                         this.B = temp;
                         cost += 3;
                         console.log(`XBA: Exchanging B register 0x${hex(temp)} with A register 0x${hex(ab4)}`);
+                    }
+                    break;
+
+                case CPU.Instruction.TAX:
+                    {
+                        const X = this.A;
+
+                        if (X < 0) this.flags |= FLAGS.N_NEGATIVE;
+                        if (X === 0) this.flags |= FLAGS.Z;
+                        if (X & 0x80) this.flags |= FLAGS.V_OVERFLOW;
+
+                        this.X = X & 0xFF;
+
+                        cost += 2;
                     }
                     break;
 
@@ -372,7 +409,7 @@ module.exports = class CPU {
                     return;
             }
 
-            console.log();
+            if (options.breakAfterOne) return;
 
             // Wait for the "cost of compute" to be settled.
             // await this.waitToProcess(cost);
