@@ -1,8 +1,6 @@
 module.exports = class Memory {
-    constructor(size) {
-        this.memory = Array.from({length: size}).fill(0);
-
-        console.dir(this);
+    constructor(size, options = {}) {
+        this.memory = Array.from({length: size}).fill(options.fill || 0);
     }
 
     loadProgram(program, startAddress) {
@@ -55,7 +53,7 @@ module.exports = class Memory {
     }
 
     writeByte(value, address) {
-        this.memory[address] = value;
+        this.memory[address] = value & 0xFF;
     }
 
     writeWord(value, address) {
